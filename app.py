@@ -8,13 +8,11 @@ import zipfile
 import tempfile
 from PIL import Image
 
-def generate_with_gemini(api_key, clothing_style, title_text, obj1, obj2, obj3, obj4, original_img):
-    # 1. Convertir l'image en Base64 pour l'envoyer à Google
+def generate_with_gemini(api_key, model_name, clothing_style, title_text, obj1, obj2, obj3, obj4, original_img):
     buffered = io.BytesIO()
     original_img.save(buffered, format="PNG")
     img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
     
-    # 2. Le prompt
     prompt = (
         f"Look at the provided image. It's a children's English vocabulary poster. "
         f"Generate a NEW image that looks EXACTLY like this one in terms of style, layout, and design. "
@@ -27,10 +25,9 @@ def generate_with_gemini(api_key, clothing_style, title_text, obj1, obj2, obj3, 
         f"Return only the image."
     )
     
-    # 3. L'URL directe avec le modèle NANO BANANA (gemini-2.5-flash-image)
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key={api_key}"
+    # On utilise la variable model_name ici
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
     
-    # 4. Le corps de la requête (format JSON)
     payload = {
         "contents": [{
             "parts": [
@@ -46,7 +43,6 @@ def generate_with_gemini(api_key, clothing_style, title_text, obj1, obj2, obj3, 
     headers = {"Content-Type": "application/json"}
     
     try:
-        # 5. Envoi de la requête
         response = requests.post(url, json=payload, headers=headers, timeout=120)
         
         if response.status_code == 200:
@@ -67,7 +63,7 @@ def generate_with_gemini(api_key, clothing_style, title_text, obj1, obj2, obj3, 
         print(f"Erreur réseau:", e)
         return None
 
-def batch_generate_images(api_key, clothing_style, title_text, word_list, progress=gr.Progress()):
+def batch_generate_images(api_key, model_name, clothing_style, title_text, word_list, progress=gr.Progress()):
     if not api_key:
         yield [], "❌ Erreur: Tu dois renseigner ta clé API Gemini.", None
         return
@@ -99,9 +95,9 @@ def batch_generate_images(api_key, clothing_style, title_text, word_list, progre
                 chunk.append("None")
             obj1, obj2, obj3, obj4 = chunk
             
-            progress((i / total_images), desc=f"Génération image {i+1}/{total_images} avec Nano Banana...")
+            progress((i / total_images), desc=f"Génération image {i+1}/{total_images} avec {model_name}...")
 
-            img = generate_with_gemini(api_key, clothing_style, title_text, obj1, obj2, obj3, obj4, original_img)
+            img = generate_with_gemini(api_key, model_name, clothing_style, title_text, obj1, obj2, obj3, obj4, original_img)
             
             if img:
                 img_name = f"poster_{i+1}_{obj1}_{obj2}.png".replace(" ", "_").replace("/", "_")
@@ -125,6 +121,20 @@ with gr.Blocks(title="Batch Vocab Poster Generator", theme=gr.themes.Soft()) as 
     with gr.Row():
         with gr.Column(scale=1):
             api_key_input = gr.Textbox(label="🔑 Clé API Google Gemini", type="password", placeholder="AIza... ou AQ.Ab...")
+            
+            # NOUVEAU : Menu déroulant pour choisir le modèle en cas de quota 0
+            model_input = gr.Dropdown(
+                choices=[
+                    "gemini-2.5-flash-image",             # Nano Banana
+                    "gemini-3-pro-image-preview",         # Nano Banana Pro
+                    "gemini-3.1-flash-image-preview",     # Nano Banana 2
+                    "gemini-3-pro-image",                 # Nano Banana Pro (Stable)
+                    "gemini-3.1-flash-image"              # Nano Banana 2 (Stable)
+                ],
+                value="gemini-3-pro-image-preview", # On essaie la V3 Pro par défaut
+                label="🤖 Modèle Gemini à utiliser"
+            )
+
             clothing_input = gr.Textbox(label="👗 Style de vêtements (fixe)", value="Winter outfit")
             title_input = gr.Textbox(label="🏷️ Titre central (fixe)", value="Winter Vocabulary")
             
@@ -184,7 +194,7 @@ frosty"""
 
     generate_btn.click(
         fn=batch_generate_images,
-        inputs=[api_key_input, clothing_input, title_input, word_list_input],
+        inputs=[api_key_input, model_input, clothing_input, title_input, word_list_input],
         outputs=[gallery_output, status_output, download_btn]
     )
 
