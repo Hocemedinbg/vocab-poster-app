@@ -27,8 +27,8 @@ def generate_with_gemini(api_key, clothing_style, title_text, obj1, obj2, obj3, 
         f"Return only the image."
     )
     
-    # 3. L'URL directe de l'API REST de Google Gemini
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={api_key}"
+    # 3. L'URL directe avec le modèle NANO BANANA (gemini-2.5-flash-image)
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key={api_key}"
     
     # 4. Le corps de la requête (format JSON)
     payload = {
@@ -51,7 +51,6 @@ def generate_with_gemini(api_key, clothing_style, title_text, obj1, obj2, obj3, 
         
         if response.status_code == 200:
             data = response.json()
-            # On cherche l'image dans la réponse
             for candidate in data.get('candidates', []):
                 for part in candidate.get('content', {}).get('parts', []):
                     if 'inlineData' in part:
@@ -100,7 +99,7 @@ def batch_generate_images(api_key, clothing_style, title_text, word_list, progre
                 chunk.append("None")
             obj1, obj2, obj3, obj4 = chunk
             
-            progress((i / total_images), desc=f"Génération image {i+1}/{total_images} avec Gemini...")
+            progress((i / total_images), desc=f"Génération image {i+1}/{total_images} avec Nano Banana...")
 
             img = generate_with_gemini(api_key, clothing_style, title_text, obj1, obj2, obj3, obj4, original_img)
             
@@ -121,11 +120,11 @@ def batch_generate_images(api_key, clothing_style, title_text, word_list, progre
 
 
 with gr.Blocks(title="Batch Vocab Poster Generator", theme=gr.themes.Soft()) as app:
-    gr.Markdown("# 🎨 Batch Vocabulary Poster Generator (API REST Directe)")
+    gr.Markdown("# 🍌 Batch Vocabulary Poster Generator (Powered by Nano Banana)")
 
     with gr.Row():
         with gr.Column(scale=1):
-            api_key_input = gr.Textbox(label="🔑 Clé API Google Gemini", type="password", placeholder="AIza...")
+            api_key_input = gr.Textbox(label="🔑 Clé API Google Gemini", type="password", placeholder="AIza... ou AQ.Ab...")
             clothing_input = gr.Textbox(label="👗 Style de vêtements (fixe)", value="Winter outfit")
             title_input = gr.Textbox(label="🏷️ Titre central (fixe)", value="Winter Vocabulary")
             
