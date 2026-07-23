@@ -12,7 +12,12 @@ import time
 def generate_with_gemini(api_key, clothing_style, title_text, obj1, obj2, obj3, obj4, original_img):
     # Configuration du client Gemini
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash-exp") # Modèle supportant la génération d'images
+    
+    # On utilise le bon nom de modèle ET on force la modalité IMAGE
+    model = genai.GenerativeModel(
+        "gemini-2.0-flash-exp-image-generation",
+        generation_config={"response_modalities": ["IMAGE", "TEXT"]}
+    )
     
     # On force Gemini à garder la même structure
     prompt = (
@@ -38,6 +43,10 @@ def generate_with_gemini(api_key, clothing_style, title_text, obj1, obj2, obj3, 
                 return Image.open(io.BytesIO(image_bytes))
                 
         return None # Si Gemini n'a pas renvoyé d'image (parfois il répond en texte)
+        
+    except Exception as e:
+        print(f"Erreur Gemini: {e}")
+        return None
         
     except Exception as e:
         print(f"Erreur Gemini: {e}")
