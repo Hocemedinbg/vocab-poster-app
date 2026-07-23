@@ -1,25 +1,20 @@
 import gradio as gr
-import google.generativeai as genai
-from PIL import Image
+import requests
+import base64
 import io
 import os
-import random
+import time
 import zipfile
 import tempfile
-import time
+from PIL import Image
 
-# ─── 1. Fonction de génération Gemini ───
 def generate_with_gemini(api_key, clothing_style, title_text, obj1, obj2, obj3, obj4, original_img):
-    # Configuration du client Gemini
-    genai.configure(api_key=api_key)
+    # 1. Convertir l'image en Base64 pour l'envoyer à Google
+    buffered = io.BytesIO()
+    original_img.save(buffered, format="PNG")
+    img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
     
-    # On utilise le bon nom de modèle ET on force la modalité IMAGE
-    model = genai.GenerativeModel(
-        "gemini-2.0-flash-exp-image-generation",
-        generation_config={"response_modalities": ["IMAGE", "TEXT"]}
-    )
-    
-    # On force Gemini à garder la même structure
+    # 2. Le prompt
     prompt = (
         f"Look at the provided image. It's a children's English vocabulary poster. "
         f"Generate a NEW image that looks EXACTLY like this one in terms of style, layout, and design. "
@@ -31,43 +26,59 @@ def generate_with_gemini(api_key, clothing_style, title_text, obj1, obj2, obj3, 
         f"Draw these 4 new items in the same cute cartoon style. "
         f"Return only the image."
     )
-
+    
+    # 3. L'URL directe de l'API REST de Google Gemini
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={api_key}"
+    
+    # 4. Le corps de la requête (format JSON)
+    payload = {
+        "contents": [{
+            "parts": [
+                {"text": prompt},
+                {"inline_data": {"mime_type": "image/png", "data": img_base64}}
+            ]
+        }],
+        "generationConfig": {
+            "responseModalities": ["IMAGE", "TEXT"]
+        }
+    }
+    
+    headers = {"Content-Type": "application/json"}
+    
     try:
-        # On envoie l'image originale ET le prompt à Gemini
-        response = model.generate_content([prompt, original_img])
+        # 5. Envoi de la requête
+        response = requests.post(url, json=payload, headers=headers, timeout=120)
         
-        # On cherche l'image générée dans la réponse de Gemini
-        for part in response.candidates[0].content.parts:
-            if part.inline_data is not None:
-                image_bytes = part.inline_data.data
-                return Image.open(io.BytesIO(image_bytes))
-                
-        return None # Si Gemini n'a pas renvoyé d'image (parfois il répond en texte)
-        
+        if response.status_code == 200:
+            data = response.json()
+            # On cherche l'image dans la réponse
+            for candidate in data.get('candidates', []):
+                for part in candidate.get('content', {}).get('parts', []):
+                    if 'inlineData' in part:
+                        image_bytes = base64.b64decode(part['inlineData']['data'])
+                        return Image.open(io.BytesIO(image_bytes))
+            
+            print("Réponse Gemini sans image:", data)
+            return None
+        else:
+            print(f"Erreur API Gemini ({response.status_code}):", response.text)
+            return None
+            
     except Exception as e:
-        print(f"Erreur Gemini: {e}")
-        return None
-        
-    except Exception as e:
-        print(f"Erreur Gemini: {e}")
+        print(f"Erreur réseau:", e)
         return None
 
-# ─── 2. Fonction principale de traitement par lot (Batch) ───
-def batch_generate_images(
-    api_key, clothing_style, title_text, word_list, progress=gr.Progress()
-):
+def batch_generate_images(api_key, clothing_style, title_text, word_list, progress=gr.Progress()):
     if not api_key:
         yield [], "❌ Erreur: Tu dois renseigner ta clé API Gemini.", None
         return
 
-    # Chargement de l'image originale locale
     try:
         original_img = Image.open("original.png")
     except FileNotFoundError:
-        yield [], "❌ Erreur: Le fichier original.png est introuvable dans le dossier.", None
+        yield [], "❌ Erreur: Le fichier original.png est introuvable.", None
         return
 
-    # Nettoyage de la liste
     raw_words = word_list.split('\n')
     ignore_words = ["winter adjectives", "winter clothes", "download"]
     words = [w.strip() for w in raw_words if w.strip() and w.strip().lower() not in ignore_words]
@@ -91,7 +102,6 @@ def batch_generate_images(
             
             progress((i / total_images), desc=f"Génération image {i+1}/{total_images} avec Gemini...")
 
-            # Appel à notre fonction Gemini
             img = generate_with_gemini(api_key, clothing_style, title_text, obj1, obj2, obj3, obj4, original_img)
             
             if img:
@@ -100,33 +110,22 @@ def batch_generate_images(
                 img.save(img_path)
                 zipf.write(img_path, arcname=img_name)
                 gallery_items.append((img_path, f"Poster {i+1}: {obj1}, {obj2}, {obj3}, {obj4}"))
-                
-                status_msg = f"✅ Image {i+1}/{total_images} générée !"
-                yield gallery_items, status_msg, None
+                yield gallery_items, f"✅ Image {i+1}/{total_images} générée !", None
             else:
-                yield gallery_items, f"⚠️ L'image {i+1} n'a pas pu être générée (Gemini a peut-être refusé ou mis trop de temps).", None
+                yield gallery_items, f"⚠️ L'image {i+1} n'a pas pu être générée. Regarde le terminal.", None
             
-            # Petite pause pour éviter de spammer l'API (Rate limits)
             time.sleep(2)
 
     progress(1.0, desc="Terminé ! ✅")
-    final_status = f"🎉 Processus terminé ! {total_images} images traitées. Le ZIP est prêt !"
-    yield gallery_items, final_status, zip_path
+    yield gallery_items, f"🎉 Processus terminé ! Le ZIP est prêt !", zip_path
 
 
-# ─── 3. Interface Gradio ───
 with gr.Blocks(title="Batch Vocab Poster Generator", theme=gr.themes.Soft()) as app:
-    gr.Markdown("# 🎨 Batch Vocabulary Poster Generator (Powered by Gemini 2.0)")
-    gr.Markdown("Utilise l'IA Gemini pour modifier intelligemment ton poster original !")
+    gr.Markdown("# 🎨 Batch Vocabulary Poster Generator (API REST Directe)")
 
     with gr.Row():
-        # COLONNE GAUCHE
         with gr.Column(scale=1):
-            api_key_input = gr.Textbox(
-                label="🔑 Clé API Google Gemini", 
-                type="password", 
-                placeholder="AIza..."
-            )
+            api_key_input = gr.Textbox(label="🔑 Clé API Google Gemini", type="password", placeholder="AIza...")
             clothing_input = gr.Textbox(label="👗 Style de vêtements (fixe)", value="Winter outfit")
             title_input = gr.Textbox(label="🏷️ Titre central (fixe)", value="Winter Vocabulary")
             
@@ -178,11 +177,9 @@ frosty"""
 
             generate_btn = gr.Button("🚀 Générer le lot avec Gemini", variant="primary", size="lg")
 
-        # COLONNE DROITE
         with gr.Column(scale=1):
             gr.Markdown("### 🖼️ Aperçu des posters générés")
             gallery_output = gr.Gallery(label="Galerie", columns=2, height=600, show_label=False)
-            
             status_output = gr.Textbox(label="📊 Statut", interactive=False, lines=2)
             download_btn = gr.DownloadButton("📥 Télécharger le ZIP", variant="secondary", size="lg")
 
